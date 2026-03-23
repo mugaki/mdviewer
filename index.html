@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Markdown Viewer</title>
+<link rel="icon" href="/icon.ico" type="image/x-icon">
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
+<link rel="stylesheet" id="hljs-light" href="/vendor/css/github.min.css">
+<link rel="stylesheet" id="hljs-dark"  href="/vendor/css/github-dark.min.css" disabled>
+<script src="/vendor/highlight.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --sidebar-w: 260px;
+    --topbar-h: 44px;
+    --bg:        #ffffff;
+    --bg2:       #f6f8fa;
+    --bg3:       #eaeef2;
+    --border:    #d0d7de;
+    --text:      #1f2328;
+    --text2:     #656d76;
+    --accent:    #0969da;
+    --accent-bg: #ddf4ff;
+    --hover:     #f3f4f6;
+    --active:    #e8f3ff;
+    --scrollbar: #c8ccd0;
+  }
+  [data-theme="dark"] {
+    --bg:        #0d1117;
+    --bg2:       #161b22;
+    --bg3:       #21262d;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --text2:     #8b949e;
+    --accent:    #58a6ff;
+    --accent-bg: #121d2f;
+    --hover:     #1c2128;
+    --active:    #192335;
+    --scrollbar: #484f58;
+  }
+
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; background: var(--bg); color: var(--text); overflow: hidden; }
+
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---- Topbar ---- */
+  #topbar {
+    height: var(--topbar-h); min-height: var(--topbar-h);
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 10px; gap: 6px; z-index: 10;
+  }
+  .logo { font-size: 15px; color: var(--text); white-space: nowrap; margin-right: 4px; display: flex; align-items: center; gap: 6px; }
+  .logo img { width: 20px; height: 20px; object-fit: contain; }
+  #file-title { font-size: 12px; color: var(--text2); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; min-width: 0; }
+
+  .tbtn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text2); cursor: pointer; padding: 4px 9px; font-size: 12px;
+    white-space: nowrap; transition: background 0.15s; flex-shrink: 0;
+  }
+  .tbtn:hover { background: var(--hover); color: var(--text); }
+  .tbtn.icon { font-size: 15px; padding: 4px 7px; }
+
+  /* ---- Main ---- */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ---- Sidebar ---- */
+  #sidebar {
+    width: var(--sidebar-w); min-width: var(--sidebar-w);
+    background: var(--bg2); border-right: none;
+    display: flex; flex-direction: column; overflow: hidden;
+    transition: width 0.2s, min-width 0.2s;
+  }
+  #sidebar.collapsed { width: 0; min-width: 0; }
+
+  /* ---- Resizer ---- */
+  #resizer {
+    width: 8px; min-width: 8px; cursor: col-resize;
+    background: transparent;
+    flex-shrink: 0;
+    position: relative; z-index: 5;
+  }
+  #resizer::after {
+    content: ''; position: absolute;
+    top: 0; bottom: 0; left: 3px;
+    width: 2px; background: var(--border);
+    transition: background 0.15s, width 0.15s, left 0.15s;
+  }
+  #resizer:hover::after, #resizer.dragging::after {
+    left: 2px; width: 4px; background: var(--text2);
+  }
+  #sidebar.collapsed + #resizer { display: none; }
+
+  #sidebar-header { padding: 6px 8px 6px 12px; font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  #sidebar-header span { flex: 1; }
+  #sidebar-header span { flex: 1; }
+
+  #file-tree { overflow-y: auto; flex: 1; padding: 6px 4px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+
+  .tree-dir { user-select: none; }
+  .tree-dir-label { display: flex; align-items: center; gap: 5px; padding: 4px 8px; cursor: pointer; border-radius: 6px; color: var(--text2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree-dir-label:hover { background: var(--hover); }
+  .tree-dir-label .icon { font-size: 11px; transition: transform 0.15s; flex-shrink: 0; }
+  .tree-dir.open > .tree-dir-label .icon { transform: rotate(90deg); }
+  .tree-dir-children { padding-left: 14px; display: none; }
+  .tree-dir.open > .tree-dir-children { display: block; }
+
+  .tree-file { display: flex; align-items: center; gap: 6px; padding: 4px 8px; cursor: pointer; border-radius: 6px; color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.1s; }
+  .tree-file:hover { background: var(--hover); }
+  .tree-file.active { background: var(--active); color: var(--accent); font-weight: 600; }
+  .tree-file .icon { flex-shrink: 0; width: 1.2em; text-align: center; }
+  .tree-file.non-md { color: var(--text2); cursor: default; }
+  .tree-file.non-md:hover { background: none; }
+
+  /* ---- Content ---- */
+  #content-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  #content { flex: 1; overflow-y: auto; padding: 32px 48px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+  #content-inner { max-width: 860px; margin: 0 auto; }
+
+  /* ---- Welcome ---- */
+  #welcome {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; gap: 20px; color: var(--text2); text-align: center;
+  }
+  #welcome .big { font-size: 56px; }
+  #welcome h2 { font-size: 18px; font-weight: 600; color: var(--text); }
+  #welcome p { font-size: 14px; line-height: 1.7; }
+  .welcome-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+  .welcome-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 10px 20px; font-size: 14px; cursor: pointer; font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  .welcome-btn:hover { opacity: 0.85; }
+  .welcome-btn.secondary { background: none; border: 1px solid var(--border); color: var(--text); font-weight: 400; }
+  .welcome-btn.secondary:hover { background: var(--hover); }
+
+  /* ---- Markdown ---- */
+  .md h1,.md h2,.md h3,.md h4,.md h5,.md h6 { color: var(--text); font-weight: 700; line-height: 1.3; margin: 1.4em 0 0.5em; }
+  .md h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  .md h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  .md h3 { font-size: 1.25em; }
+  .md h4 { font-size: 1.05em; }
+  .md h1:first-child,.md h2:first-child { margin-top: 0; }
+  .md p { line-height: 1.8; margin: 0.7em 0; }
+  .md a { color: var(--accent); text-decoration: none; }
+  .md a:hover { text-decoration: underline; }
+  .md ul,.md ol { padding-left: 1.8em; margin: 0.6em 0; }
+  .md li { line-height: 1.7; margin: 0.2em 0; }
+  .md li>ul,.md li>ol { margin: 0.1em 0; }
+  .md blockquote { border-left: 4px solid var(--accent); background: var(--accent-bg); margin: 0.8em 0; padding: 0.6em 1em; border-radius: 0 6px 6px 0; color: var(--text2); }
+  .md blockquote p { margin: 0; color: inherit; }
+  .md code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: var(--bg3); padding: 0.15em 0.4em; border-radius: 4px; }
+  .md pre { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; margin: 0.8em 0; overflow-x: auto; }
+  .md pre code { background: none; padding: 1em 1.2em; display: block; font-size: 0.875em; line-height: 1.6; }
+  .md table { border-collapse: collapse; width: 100%; margin: 0.8em 0; font-size: 0.9em; }
+  .md th,.md td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  .md th { background: var(--bg2); font-weight: 600; }
+  .md tr:nth-child(even) { background: var(--bg2); }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+  .md img { max-width: 100%; border-radius: 6px; }
+
+  .md .mermaid-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 0.8em 0; text-align: center; overflow-x: auto; }
+  .md .mermaid-wrap svg { max-width: 100%; height: auto; }
+  .md .mermaid-error { color: #cf222e; font-size: 0.85em; font-family: monospace; padding: 8px; }
+
+  /* ---- Toast ---- */
+  #toast { position: fixed; bottom: 20px; right: 20px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; color: var(--text2); opacity: 0; transform: translateY(8px); transition: opacity 0.3s, transform 0.3s; pointer-events: none; z-index: 100; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+
+  /* ---- App menu & Context menu (共通) ---- */
+  .ctx-menu {
+    position: fixed; z-index: 1000;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px; min-width: 200px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  }
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; color: var(--text); white-space: nowrap;
+  }
+  .ctx-item:hover { background: var(--hover); }
+  .ctx-sep { border-top: 1px solid var(--border); margin: 4px 0; }
+
+  /* メニューボタン自体を押したとき強調 */
+  #btn-menu.active { background: var(--hover); color: var(--text); }
+
+  @media (max-width: 640px) {
+    #content { padding: 20px; }
+    #sidebar { position: absolute; height: 100%; z-index: 20; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <button class="tbtn icon" id="btn-menu" title="メニュー">☰</button>
+    <button class="tbtn icon" id="btn-sidebar" title="サイドバーを隠す">◀</button>
+    <span class="logo"><img src="/icon.ico" alt="logo"><strong>Markdown</strong> Viewer</span>
+    <span id="file-title"></span>
+    <button class="tbtn icon" id="btn-theme" title="ダーク/ライト切替">🌙</button>
+  </header>
+
+  <div id="main">
+    <nav id="sidebar">
+      <div id="sidebar-header">
+        <span>FILES</span>
+      </div>
+      <div id="file-tree"></div>
+    </nav>
+    <div id="resizer"></div>
+
+    <div id="content-wrap">
+      <div id="content">
+        <div id="welcome">
+          <div class="big">📄</div>
+          <h2>Markdown Viewer</h2>
+          <p>フォルダまたはファイルを開いて<br>Markdownを表示します</p>
+          <div class="welcome-btns">
+            <button class="welcome-btn" id="btn-open-folder2">📂 フォルダを開く</button>
+            <button class="welcome-btn secondary" id="btn-open-file2">📄 ファイルを開く</button>
+          </div>
+          <p style="font-size:12px;margin-top:8px;">各タブで別々のフォルダ/ファイルを開けます</p>
+        </div>
+        <div id="content-inner" class="md" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ---- Constants ----
+const MD_EXTS   = new Set(['.md','.markdown','.mdown','.mkd']);
+const THEME_KEY = 'md-viewer-theme';
+
+// ---- State ----
+const state = {
+  dirHandle:   null,   // FileSystemDirectoryHandle
+  currentFile: null,   // { path, handle, lastModified }
+  fileTree:    [],
+  openPaths:   new Set(),  // 展開中のディレクトリパス
+  watchTimer:  null,
+};
+
+// ---- フリッカー防止: URLパラメータがあれば即ローディング表示 ----
+(function() {
+  const p = new URLSearchParams(location.search);
+  if (p.has('rootdir') || p.has('file')) {
+    document.getElementById('welcome').style.display = 'none';
+    const inner = document.getElementById('content-inner');
+    inner.style.display = 'block';
+    inner.innerHTML = '<p style="padding:3em;color:var(--text2);text-align:center;font-size:15px;">⏳ 読み込み中...</p>';
+  }
+})();
+
+// ---- Helpers ----
+function isMd(name) {
+  const i = name.lastIndexOf('.');
+  return i >= 0 && MD_EXTS.has(name.slice(i).toLowerCase());
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ---- Theme ----
+function sysTheme() { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('btn-theme').textContent = theme === 'dark' ? '☀️' : '🌙';
+  document.getElementById('hljs-light').disabled = theme === 'dark';
+  document.getElementById('hljs-dark').disabled  = theme !== 'dark';
+  mermaid.initialize({ startOnLoad: false, theme: theme === 'dark' ? 'dark' : 'default', securityLevel: 'loose' });
+}
+
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || sysTheme();
+  const next = cur === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+  renderCurrentMermaid();
+}
+
+(function(){ applyTheme(localStorage.getItem(THEME_KEY) || sysTheme()); })();
+document.getElementById('btn-theme').addEventListener('click', toggleTheme);
+
+// ---- Sidebar resize ----
+(function() {
+  const resizer = document.getElementById('resizer');
+  const MIN_W = 120, MAX_W = 600;
+  let startX, startW;
+
+  resizer.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    startX = e.clientX;
+    startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'));
+
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    function onMove(e) {
+      const w = Math.min(MAX_W, Math.max(MIN_W, startW + e.clientX - startX));
+      document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+    }
+    function onUp() {
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+})();
+
+// ---- App menu (☰) ----
+let _appMenu = null;
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+function openAppMenu() {
+  const btn = document.getElementById('btn-menu');
+  if (_appMenu) { _appMenu.remove(); _appMenu = null; btn.classList.remove('active'); return; }
+
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  const r = btn.getBoundingClientRect();
+  menu.style.left = r.left + 'px';
+  menu.style.top  = (r.bottom + 4) + 'px';
+
+  function addItem(icon, label, fn) {
+    const item = document.createElement('div');
+    item.className = 'ctx-item';
+    item.innerHTML = `<span>${icon}</span><span>${label}</span>`;
+    item.addEventListener('click', () => { menu.remove(); _appMenu = null; btn.classList.remove('active'); fn(); });
+    menu.appendChild(item);
+  }
+  addItem('📂', 'フォルダを開く', openFolder);
+  addItem('📄', 'ファイルを開く', openFile);
+
+  const sep = document.createElement('div'); sep.className = 'ctx-sep'; menu.appendChild(sep);
+  addItem('⏹', '終了', () => fetch('/quit').then(() => window.close()).catch(() => {}));
+
+  document.body.appendChild(menu);
+  _appMenu = menu;
+  btn.classList.add('active');
+}
+
+document.getElementById('btn-menu').addEventListener('click', e => { e.stopPropagation(); openAppMenu(); });
+document.addEventListener('click', () => {
+  if (_appMenu) { _appMenu.remove(); _appMenu = null; document.getElementById('btn-menu').classList.remove('active'); }
+});
+
+// ---- Sidebar toggle button ----
+function updateSidebarBtn() {
+  const hidden = document.getElementById('sidebar').classList.contains('collapsed');
+  const btn = document.getElementById('btn-sidebar');
+  btn.textContent = hidden ? '▶' : '◀';
+  btn.title = hidden ? 'サイドバーを表示' : 'サイドバーを隠す';
+}
+document.getElementById('btn-sidebar').addEventListener('click', () => { toggleSidebar(); updateSidebarBtn(); });
+
+// ---- Toast ----
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ---- marked setup ----
+marked.use({ gfm: true, breaks: false });
+
+// ---- Mermaid ----
+let mermaidCounter = 0;
+async function renderCurrentMermaid() {
+  const container = document.getElementById('content-inner');
+  for (const node of container.querySelectorAll('.mermaid-wrap .mermaid')) {
+    const src = node.dataset.src || node.textContent;
+    if (!src.trim()) continue;
+    const id = `mermaid-${++mermaidCounter}`;
+    node.innerHTML = '';
+    try {
+      const { svg } = await mermaid.render(id, src);
+      node.innerHTML = svg;
+    } catch(e) {
+      node.innerHTML = `<div class="mermaid-error">⚠️ Mermaid error: ${escapeHtml(String(e.message||e))}</div>`;
+    }
+  }
+}
+
+// ---- Syntax highlight ----
+function highlightCode(container) {
+  if (typeof hljs === 'undefined') return;
+  container.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+}
+
+// ---- Relative path resolver ----
+function resolvePath(currentPath, relativePath) {
+  const parts = currentPath.split('/');
+  parts.pop(); // remove filename, keep directory
+  for (const part of relativePath.split('/')) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') { if (parts.length > 0) parts.pop(); }
+    else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+// ---- Link click handler (relative .md links) ----
+document.getElementById('content-inner').addEventListener('click', function(e) {
+  const a = e.target.closest('a');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href) return;
+
+  // Anchor-only: scroll within page
+  if (href.startsWith('#')) {
+    e.preventDefault();
+    const target = document.getElementById(decodeURIComponent(href.slice(1)));
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+
+  // スキームありのURL: 危険なスキームは無視、それ以外は別タブで開く
+  if (/^[a-z][a-z\d+\-.]*:/i.test(href)) {
+    if (/^(javascript|vbscript|data|file):/i.test(href)) return;
+    e.preventDefault(); window.open(href, '_blank', 'noopener noreferrer'); return;
+  }
+
+  if (!state.currentFile) return;
+
+  // Split path and anchor
+  const hashIdx = href.indexOf('#');
+  const hrefPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+  const anchor   = hashIdx >= 0 ? href.slice(hashIdx + 1) : null;
+
+  // URL デコードしてからパスを解決
+  const decodedPath = hrefPath.split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }).join('/');
+  // / 始まりはルート相対パス（先頭の / を除去）
+  const basePath = decodedPath.startsWith('/')
+    ? decodedPath.slice(1)
+    : resolvePath(state.currentFile.path, decodedPath);
+
+  e.preventDefault();
+
+  // Find entry: try exact path (if .md), then try appending markdown extensions
+  (async () => {
+    try {
+      let entry = isMd(basePath) ? await loadEntryByPath(basePath) : null;
+      if (!entry) {
+        for (const ext of ['.md', '.markdown', '.mdown', '.mkd']) {
+          entry = await loadEntryByPath(basePath + ext);
+          if (entry) break;
+        }
+      }
+      if (!entry) { showToast('ファイルが見つかりません: ' + basePath); return; }
+      await openEntry(entry);
+      if (anchor) {
+        setTimeout(() => {
+          const t = document.getElementById(decodeURIComponent(anchor));
+          if (t) t.scrollIntoView({ behavior: 'smooth' });
+        }, 150);
+      }
+    } catch(e) { showToast('リンクエラー: ' + e.message); }
+  })();
+});
+
+// ---- Load images via File System Access API ----
+let _blobUrls = [];
+
+async function loadImages(container) {
+  if (!state.currentFile || !state.dirHandle) return;
+  for (const img of container.querySelectorAll('img')) {
+    const src = img.getAttribute('src');
+    if (!src || /^(https?:|data:|blob:|\/\/)/i.test(src)) continue;
+    const decoded = src.split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }).join('/');
+    const parts = resolvePath(state.currentFile.path, decoded).split('/').filter(Boolean);
+    try {
+      let dir = state.dirHandle;
+      for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+      const file = await (await dir.getFileHandle(parts[parts.length - 1])).getFile();
+      const url = URL.createObjectURL(file);
+      _blobUrls.push(url);
+      img.src = url;
+    } catch {}
+  }
+}
+
+// ---- Render Markdown ----
+function renderMarkdown(text) {
+  // 前回の Blob URL を解放
+  _blobUrls.forEach(u => URL.revokeObjectURL(u));
+  _blobUrls = [];
+
+  // :::mermaid ... ::: を ```mermaid ... ``` に変換
+  text = text.replace(/^:::mermaid\s*\n([\s\S]*?)\n:::/gm, (_, code) => '```mermaid\n' + code + '\n```');
+
+  const inner = document.getElementById('content-inner');
+  const welcome = document.getElementById('welcome');
+  try {
+    const raw = marked.parse(text);
+    const html = DOMPurify.sanitize(typeof raw === 'string' ? raw : String(raw));
+    inner.innerHTML = html;
+  } catch(e) {
+    inner.innerHTML = `<pre style="color:red">Parse error: ${escapeHtml(String(e))}</pre>`;
+  }
+  inner.style.display = 'block';
+  welcome.style.display = 'none';
+  document.getElementById('content').scrollTop = 0;
+
+  // mermaid コードブロックを変換
+  inner.querySelectorAll('pre code.language-mermaid, pre code.lang-mermaid').forEach(codeEl => {
+    const src = codeEl.textContent;
+    const wrap = document.createElement('div'); wrap.className = 'mermaid-wrap';
+    const div  = document.createElement('div'); div.className = 'mermaid'; div.textContent = src; div.dataset.src = src;
+    wrap.appendChild(div);
+    codeEl.closest('pre').replaceWith(wrap);
+  });
+
+  highlightCode(inner);
+  renderCurrentMermaid();
+  loadImages(inner);
+}
+
+// ---- File tree (lazy load) ----
+async function loadDir(dirHandle, path) {
+  path = path || '';
+  const dirs = [], files = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'directory') {
+      dirs.push({ name, handle });
+    } else if (handle.kind === 'file') {
+      files.push({ name, handle });
+    }
+  }
+  dirs.sort((a,b) => a.name.localeCompare(b.name));
+  files.sort((a,b) => a.name.localeCompare(b.name));
+
+  const entries = [];
+  for (const { name, handle } of dirs) {
+    const p = path ? `${path}/${name}` : name;
+    entries.push({ type: 'dir', name, path: p, handle, children: null });
+  }
+  for (const { name, handle } of files) {
+    const p = path ? `${path}/${name}` : name;
+    entries.push({ type: 'file', name, path: p, handle });
+  }
+  return entries;
+}
+
+// ---- ファイルツリー自動更新 ----
+async function syncNodes(nodes, dirHandle, path, container) {
+  const fresh = await loadDir(dirHandle, path);
+
+  // 削除されたエントリをDOMとnodesから除去
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    if (!fresh.find(e => e.name === n.name && e.type === n.type)) {
+      const sel = n.type === 'dir'
+        ? `.tree-dir[data-path="${CSS.escape(n.path)}"]`
+        : `.tree-file[data-path="${CSS.escape(n.path)}"]`;
+      const el = container.querySelector(':scope > ' + sel);
+      if (el) el.remove();
+      nodes.splice(i, 1);
+    }
+  }
+
+  // 新規エントリをnodesとDOMに追加
+  for (const entry of fresh) {
+    if (!nodes.find(n => n.name === entry.name && n.type === entry.type)) {
+      nodes.push(entry);
+      nodes.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      const newIdx = nodes.indexOf(entry);
+      const el = createNode(entry);
+      if (newIdx >= container.children.length) container.appendChild(el);
+      else container.insertBefore(el, container.children[newIdx]);
+    }
+  }
+
+  // 展開済みサブディレクトリを再帰的に同期
+  for (const node of nodes) {
+    if (node.type === 'dir' && node.children !== null) {
+      const childContainer = container.querySelector(`:scope > .tree-dir[data-path="${CSS.escape(node.path)}"] > .tree-dir-children`);
+      if (childContainer) await syncNodes(node.children, node.handle, node.path, childContainer);
+    }
+  }
+}
+
+function startWatching() {
+  if (state.watchTimer) clearInterval(state.watchTimer);
+  state.watchTimer = setInterval(async () => {
+    if (!state.dirHandle) return;
+    await syncNodes(state.fileTree, state.dirHandle, '', document.getElementById('file-tree'));
+  }, 2000);
+}
+
+function renderTree(nodes, container) {
+  container.innerHTML = '';
+  nodes.forEach(n => container.appendChild(createNode(n)));
+}
+
+function createNode(node) {
+  if (node.type === 'dir') {
+    const isOpen = state.openPaths.has(node.path);
+    const wrap  = document.createElement('div'); wrap.className = 'tree-dir' + (isOpen ? ' open' : ''); wrap.dataset.path = node.path;
+    const label = document.createElement('div'); label.className = 'tree-dir-label';
+    label.innerHTML = `<span class="icon">▶</span><span>📁 ${escapeHtml(node.name)}</span>`;
+    const children = document.createElement('div'); children.className = 'tree-dir-children';
+    label.addEventListener('click', async () => {
+      const opening = !wrap.classList.contains('open');
+      wrap.classList.toggle('open');
+      if (opening) {
+        state.openPaths.add(node.path);
+        if (node.children === null) {
+          node.children = await loadDir(node.handle, node.path);
+          node.children.forEach(c => children.appendChild(createNode(c)));
+        }
+      } else {
+        state.openPaths.delete(node.path);
+      }
+    });
+    // 既にロード済みの場合（再レンダリング時）は子要素を描画
+    if (node.children !== null) {
+      node.children.forEach(c => children.appendChild(createNode(c)));
+    }
+    wrap.appendChild(label); wrap.appendChild(children);
+    return wrap;
+  } else {
+    const el = document.createElement('div');
+    const md = isMd(node.name);
+    el.className = 'tree-file' + (md ? '' : ' non-md');
+    el.dataset.path = node.path; el.title = node.path;
+    el.innerHTML = `<span class="icon">${md ? '📄' : ''}</span><span>${escapeHtml(node.name)}</span>`;
+    if (md) {
+      el.addEventListener('click', () => openEntry(node));
+      el.addEventListener('contextmenu', e => showCtxMenu(e, node));
+    }
+    return el;
+  }
+}
+
+function findFirst(nodes) {
+  for (const n of nodes||[]) {
+    if (n.type === 'file' && isMd(n.name)) return n;
+    const f = findFirst(n.children);
+    if (f) return f;
+  }
+  return null;
+}
+
+// パスを辿りながら未ロードのディレクトリを順次読み込んでファイルを返す
+async function loadEntryByPath(targetPath) {
+  const parts = targetPath.split('/');
+  const fileName = parts.pop();
+  let nodes = state.fileTree;
+  for (const part of parts) {
+    const dirNode = nodes.find(n => n.type === 'dir' && n.name === part);
+    if (!dirNode) return null;
+    if (dirNode.children === null) {
+      dirNode.children = await loadDir(dirNode.handle, dirNode.path);
+      const dirEl = document.querySelector(`.tree-dir[data-path="${CSS.escape(dirNode.path)}"]`);
+      if (dirEl) {
+        const childrenEl = dirEl.querySelector('.tree-dir-children');
+        if (childrenEl) dirNode.children.forEach(c => childrenEl.appendChild(createNode(c)));
+      }
+    }
+    state.openPaths.add(dirNode.path);
+    const dirEl = document.querySelector(`.tree-dir[data-path="${CSS.escape(dirNode.path)}"]`);
+    if (dirEl) dirEl.classList.add('open');
+    nodes = dirNode.children;
+  }
+  return nodes.find(n => n.type === 'file' && n.name === fileName) || null;
+}
+
+// ---- Open entry (from tree click) ----
+let _historyNav = false; // popstate 中は pushState しない
+
+async function openEntry(entry, { pushHistory = true } = {}) {
+  try {
+    const file = await entry.handle.getFile();
+    const content = await file.text();
+    state.currentFile = { path: entry.path, handle: entry.handle, lastModified: file.lastModified };
+    if (pushHistory && !_historyNav) {
+      history.pushState({ filePath: entry.path }, '', location.pathname + location.search);
+    }
+    document.getElementById('file-title').textContent = entry.path;
+    document.title = entry.name;
+    document.querySelectorAll('.tree-file').forEach(el =>
+      el.classList.toggle('active', el.dataset.path === entry.path));
+
+    // 親ディレクトリをすべて展開
+    const parts = entry.path.split('/');
+    parts.pop();
+    let dirPath = '';
+    for (const part of parts) {
+      dirPath = dirPath ? `${dirPath}/${part}` : part;
+      state.openPaths.add(dirPath);
+      const dirEl = document.querySelector(`.tree-dir[data-path="${CSS.escape(dirPath)}"]`);
+      if (dirEl) dirEl.classList.add('open');
+    }
+
+    renderMarkdown(content);
+  } catch(e) {
+    showToast('ファイルを開けませんでした: ' + e.message);
+  }
+}
+
+// ---- Open Folder ----
+async function openFolder() {
+  if (!window.showDirectoryPicker) {
+    showToast('このブラウザはフォルダ選択に対応していません');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'read' });
+    state.dirHandle = handle;
+    state.currentFile = null;
+    document.getElementById('file-title').textContent = '';
+    document.title = 'Markdown Viewer';
+    document.getElementById('content-inner').style.display = 'none';
+    document.getElementById('welcome').style.display = '';
+    document.getElementById('sidebar-header').querySelector('span').textContent = handle.name;
+    showToast('📂 読み込み中...');
+    state.fileTree = await loadDir(handle);
+    renderTree(state.fileTree, document.getElementById('file-tree'));
+    // サイドバーを開く
+    document.getElementById('sidebar').classList.remove('collapsed');
+    startWatching();
+    showToast('📂 ' + handle.name + ' を開きました');
+  } catch(e) {
+    if (e.name !== 'AbortError') showToast('フォルダを開けませんでした: ' + e.message);
+  }
+}
+
+// ---- Open File ----
+async function openFile() {
+  if (!window.showOpenFilePicker) {
+    showToast('このブラウザはファイル選択に対応していません');
+    return;
+  }
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md','.markdown','.mdown','.mkd'] } }],
+      multiple: false,
+    });
+    const file = await handle.getFile();
+    const content = await file.text();
+    state.dirHandle = null;
+    state.currentFile = { path: handle.name, handle, lastModified: file.lastModified };
+    state.fileTree = [{ type: 'file', name: handle.name, path: handle.name, handle }];
+    renderTree(state.fileTree, document.getElementById('file-tree'));
+    document.getElementById('sidebar-header').querySelector('span').textContent = 'FILES';
+    document.getElementById('sidebar').classList.remove('collapsed');
+    updateSidebarBtn();
+    document.getElementById('file-title').textContent = handle.name;
+    document.title = handle.name;
+    document.querySelectorAll('.tree-file').forEach(el =>
+      el.classList.toggle('active', el.dataset.path === handle.name));
+    renderMarkdown(content);
+  } catch(e) {
+    if (e.name !== 'AbortError') showToast('ファイルを開けませんでした: ' + e.message);
+  }
+}
+
+// ---- Auto-reload (polling) ----
+setInterval(async () => {
+  const cf = state.currentFile;
+  if (!cf?.handle) return;
+  try {
+    const file = await cf.handle.getFile();
+    if (file.lastModified !== cf.lastModified) {
+      cf.lastModified = file.lastModified;
+      const content = await file.text();
+      renderMarkdown(content);
+      showToast('🔄 ファイルが更新されました');
+    }
+  } catch(_) {}
+}, 1500);
+
+// ---- Button wiring (welcome 画面) ----
+document.getElementById('btn-open-folder2').addEventListener('click', openFolder);
+document.getElementById('btn-open-file2').addEventListener('click',   openFile);
+
+// ---- F5: ページリロードを阻止し、ファイル・サイドバーを再読み込み ----
+document.addEventListener('keydown', async function(e) {
+  if (e.key !== 'F5') return;
+  e.preventDefault();
+
+  // サイドバーのツリーを再同期
+  if (state.dirHandle) {
+    await syncNodes(state.fileTree, state.dirHandle, '', document.getElementById('file-tree'));
+  }
+
+  // 現在表示中のファイルを再読み込み
+  if (state.currentFile?.handle) {
+    try {
+      const file = await state.currentFile.handle.getFile();
+      const content = await file.text();
+      state.currentFile.lastModified = file.lastModified;
+      renderMarkdown(content);
+    } catch(err) {
+      showToast('再読み込みエラー: ' + err.message);
+      return;
+    }
+  }
+
+  showToast('🔄 再読み込みしました');
+});
+
+// ---- IndexedDB (タブ間ハンドル受け渡し) ----
+const IDB_NAME = 'mdviewer', IDB_VER = 1, IDB_STORE = 'handles';
+
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, IDB_VER);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    r.onsuccess = e => res(e.target.result);
+    r.onerror   = e => rej(e.target.error);
+  });
+}
+async function idbPut(handle) {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  const db = await idbOpen();
+  await new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(handle, id);
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+  });
+  return id;
+}
+async function idbGet(id) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const r  = tx.objectStore(IDB_STORE).get(id);
+    r.onsuccess = e => res(e.target.result);
+    r.onerror   = e => rej(e.target.error);
+  });
+}
+
+// ---- Context menu ----
+let _ctxMenu = null;
+
+function showCtxMenu(e, node) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (_ctxMenu) _ctxMenu.remove();
+
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+
+  // 座標補正（画面端に収まるよう）
+  const W = window.innerWidth, H = window.innerHeight;
+  const x = Math.min(e.clientX, W - 200);
+  const y = Math.min(e.clientY, H - 100);
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+
+  function addItem(label, fn) {
+    const item = document.createElement('div');
+    item.className = 'ctx-item';
+    item.textContent = label;
+    item.addEventListener('click', () => { menu.remove(); _ctxMenu = null; fn(); });
+    menu.appendChild(item);
+  }
+
+  addItem('🔗 新しいタブで開く', () => openFileInNewTab(node));
+
+  document.body.appendChild(menu);
+  _ctxMenu = menu;
+}
+
+document.addEventListener('click',       () => { if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; } });
+document.addEventListener('contextmenu', e => { if (_ctxMenu && !_ctxMenu.contains(e.target)) { _ctxMenu.remove(); _ctxMenu = null; } });
+
+async function openFileInNewTab(entry) {
+  try {
+    if (state.dirHandle) {
+      const id = await idbPut({
+        rootHandle: state.dirHandle,
+        openPaths:  [...state.openPaths],
+        targetPath: entry.path,
+      });
+      window.open(`/?rootdir=${id}`, '_blank');
+    } else {
+      const id = await idbPut({ fileHandle: entry.handle });
+      window.open(`/?file=${id}`, '_blank');
+    }
+  } catch(e) { showToast('エラー: ' + e.message); }
+}
+
+
+// ---- 起動時 URL パラメータ処理 ----
+async function initFromUrl() {
+  const params = new URLSearchParams(location.search);
+
+  if (params.has('rootdir')) {
+    const data = await idbGet(params.get('rootdir')).catch(() => null);
+    if (!data) { showToast('ハンドルの取得に失敗しました'); return; }
+    try {
+      const { rootHandle, openPaths, targetPath } = data;
+      if ((await rootHandle.queryPermission({ mode: 'read' })) !== 'granted')
+        await rootHandle.requestPermission({ mode: 'read' });
+
+      // ツリー開閉状態を復元してからレンダリング
+      state.openPaths = new Set(openPaths || []);
+      state.dirHandle = rootHandle;
+      document.getElementById('sidebar-header').querySelector('span').textContent = rootHandle.name;
+      state.fileTree = await loadDir(rootHandle);
+      renderTree(state.fileTree, document.getElementById('file-tree'));
+      document.getElementById('sidebar').classList.remove('collapsed');
+      startWatching();
+
+      const entry = targetPath
+        ? await loadEntryByPath(targetPath)
+        : findFirst(state.fileTree);
+      if (entry) await openEntry(entry);
+      else document.getElementById('content-inner').innerHTML = '';
+    } catch(e) { showToast('エラー: ' + e.message); }
+
+  } else if (params.has('file')) {
+    const data = await idbGet(params.get('file')).catch(() => null);
+    if (!data) { showToast('ハンドルの取得に失敗しました'); return; }
+    try {
+      const { fileHandle } = data;
+      if ((await fileHandle.queryPermission({ mode: 'read' })) !== 'granted')
+        await fileHandle.requestPermission({ mode: 'read' });
+      const entry = { type: 'file', name: fileHandle.name, path: fileHandle.name, handle: fileHandle };
+      state.fileTree = [entry];
+      renderTree(state.fileTree, document.getElementById('file-tree'));
+      document.getElementById('sidebar').classList.remove('collapsed');
+      await openEntry(entry);
+    } catch(e) { showToast('ファイルを開けませんでした: ' + e.message); }
+  }
+}
+
+window.addEventListener('popstate', async (e) => {
+  const filePath = e.state?.filePath;
+  if (!filePath || !state.fileTree.length) return;
+  _historyNav = true;
+  try {
+    const entry = await loadEntryByPath(filePath);
+    if (entry) await openEntry(entry);
+  } finally {
+    _historyNav = false;
+  }
+});
+
+initFromUrl();
+
+</script>
+</body>
+</html>

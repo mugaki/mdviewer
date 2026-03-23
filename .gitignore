@@ -1,0 +1,35 @@
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+
+# 仮想環境
+.venv/
+venv/
+env/
+.env/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# アイコン生成用の元画像
+icon_src.png
+*.png.bak
