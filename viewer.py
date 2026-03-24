@@ -6,6 +6,7 @@ Usage: python viewer.py
 
 import os
 import sys
+import socket
 import socketserver
 import webbrowser
 import threading
@@ -117,9 +118,23 @@ def _shutdown():
         threading.Thread(target=_server.shutdown, daemon=True).start()
 
 
+# ---- Single instance check ----
+def _is_already_running():
+    """ポートに接続できれば既に起動中"""
+    try:
+        with socket.create_connection((HOST, PORT), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 # ---- Main ----
 def main():
     global _tray, _server
+
+    if _is_already_running():
+        webbrowser.open(URL)
+        return
 
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     _server = server
